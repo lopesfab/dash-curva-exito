@@ -6,11 +6,10 @@ from datetime import datetime
 import copy
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
-import os
-ODOO_URL      = os.environ.get("ODOO_URL",      "https://mmp.intelligenti.com.br/")
-ODOO_DB       = os.environ.get("ODOO_DB",       "mmp.intelligenti.com.br")
-ODOO_USER     = os.environ.get("ODOO_USERNAME", "Intel_bot_andamento")
-ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "Intel_bot_andamento")
+ODOO_URL      = "https://mmp.intelligenti.com.br/"
+ODOO_DB       = "mmp.intelligenti.com.br"
+ODOO_USER     = "Intel_bot_andamento"
+ODOO_PASSWORD = "Intel_bot_andamento"
 
 # Tipos de sentença que representam ÊXITO para o réu
 EXITO_SENTENCA   = {"improcedente", "improcedente ", "extinção", "extincao", "extinção sem resolução", "extinção com resolução"}
@@ -455,12 +454,45 @@ def construir_D(registros):
     # Ordena carteiras por n desc
     carteiras_list.sort(key=lambda x: -x["n"])
 
+    # ── Metadata para o cabeçalho ────────────────────────────────────────────
+    # Coletar todas as datas válidas para pegar min/max e total
+    datas_validas = [r.get("data_sentenca") for r in registros if r.get("data_sentenca")]
+    total_sentencas = len(datas_validas)
+    data_min = min(datas_validas)[:10] if datas_validas else ""
+    data_max = max(datas_validas)[:10] if datas_validas else ""
+
+    def _fmt_mes_ano(data_iso):
+        if not data_iso:
+            return ""
+        meses = ["jan", "fev", "mar", "abr", "mai", "jun",
+                 "jul", "ago", "set", "out", "nov", "dez"]
+        y, m, _ = data_iso.split("-")
+        return f"{meses[int(m)-1]}/{y}"
+
+    def _fmt_mes_ano_capital(data_iso):
+        if not data_iso:
+            return ""
+        meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                 "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+        y, m, _ = data_iso.split("-")
+        return f"{meses[int(m)-1]} {y}"
+
+    hoje = datetime.today().strftime("%Y-%m-%d")
+
+    meta = {
+        "total_sentencas": total_sentencas,
+        "periodo_inicio": _fmt_mes_ano(data_min),
+        "periodo_fim":    _fmt_mes_ano(data_max),
+        "data_relatorio": _fmt_mes_ano_capital(hoje),
+    }
+
     return {
         "carteiras": carteiras_list,
         "details": details,
         "evolution": evolution,
         "objetos": {},
         "priorizacao": {},
+        "_meta": meta,
     }
 
 
@@ -480,6 +512,32 @@ def gerar_html(D_obj, template_path, output_path):
         count=1,
         flags=re.DOTALL
     )
+
+    # ── Atualizar cabeçalho dinamicamente ──
+    meta = D_obj.get("_meta", {})
+    if meta:
+        total_fmt = f"{meta['total_sentencas']:,}".replace(",", ".")
+        badge_novo = f'Parada Advogados — {meta["data_relatorio"]}'
+        subtitulo_novo = (
+            f"{total_fmt} sentenças ({meta['periodo_inicio']} a {meta['periodo_fim']}). "
+            f"Ofensores por comarca quando viável, por UF quando não. "
+            f"Evolução trimestral com adaptação automática de período por volume."
+        )
+
+        # Substitui o texto do badge (linha 68 do template)
+        novo_html = re.sub(
+            r'<div class="badge">Parada Advogados[^<]*</div>',
+            f'<div class="badge">{badge_novo}</div>',
+            novo_html,
+            count=1
+        )
+        # Substitui o parágrafo do subtítulo (linha 70)
+        novo_html = re.sub(
+            r'<p>[\d\.]+ sentenças[^<]*</p>',
+            f'<p>{subtitulo_novo}</p>',
+            novo_html,
+            count=1
+        )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(novo_html)
